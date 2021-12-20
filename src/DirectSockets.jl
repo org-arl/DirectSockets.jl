@@ -113,17 +113,17 @@ end
 
 ### helpers
 
+struct sockaddr_in
+  sin_family::Int16
+  sin_port::UInt16
+  in_addr::UInt32
+  sin_zero::UInt64
+end
+
 # based on netinet/in.h
 function _sockaddr(host, port)
-  sockaddr = zeros(UInt8, 16)
-  sockaddr[2] = UInt8(AF_INET)
-  sockaddr[3] = UInt8((port >> 8) & 0xff)
-  sockaddr[4] = UInt8(port & 0xff)
-  sockaddr[5] = UInt8((host >> 24) & 0xff)
-  sockaddr[6] = UInt8((host >> 16) & 0xff)
-  sockaddr[7] = UInt8((host >> 8) & 0xff)
-  sockaddr[8] = UInt8(host & 0xff)
-  sockaddr
+  sockaddr = sockaddr_in(AF_INET, hton(UInt16(port)), hton(UInt32(host)), 0)
+  reinterpret(UInt8, [sockaddr])
 end
 
 end # module
