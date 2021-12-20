@@ -26,6 +26,6 @@ using Test
   sock3 = DirectSockets.UDPSocket()
   @test bind(sock3, Sockets.InetAddr(ip"0.0.0.0", 9000))
   @test close(sock3) === nothing
-  @test recv!(sock3, buf) < 0
+  @test_throws ErrorException recv!(sock3, buf)
   @test_throws ErrorException recv(sock3)
 end
