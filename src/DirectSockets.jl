@@ -11,13 +11,14 @@ const SOCK_DGRAM = Cint(2)
 const WAITALL = Cint(0x40)
 const EAGAIN = 11
 const BUFSIZE = 1500
-const RETRY_DELAY = 0.1
+const RETRY_DELAY = 0.01
 
 ### interface
 
 "UDP socket (without libuv)."
 struct UDPSocket
   handle::Cint
+  retrydelay::Float64
 end
 
 """
@@ -25,7 +26,7 @@ end
 
 Open a UDP socket (without libuv).
 """
-UDPSocket() = UDPSocket(ccall(:socket, Cint, (Cint, Cint, Cint), AF_INET, SOCK_DGRAM, 0))
+UDPSocket(; retrydelay=RETRY_DELAY) = UDPSocket(ccall(:socket, Cint, (Cint, Cint, Cint), AF_INET, SOCK_DGRAM, 0), retrydelay)
 
 """
     close(socket::DirectSockets.UDPSocket)
