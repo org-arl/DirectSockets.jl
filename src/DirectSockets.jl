@@ -9,16 +9,14 @@ using Sockets: Sockets, IPAddr, InetAddr, IPv4, send, recv, recvfrom
 const AF_INET = Cint(2)
 const SOCK_DGRAM = Cint(2)
 const WAITALL = Cint(0x40)
-const EAGAIN = 11
+const POLLRDNORM = Cshort(0x0040)
 const BUFSIZE = 1500
-const RETRY_DELAY = 0.01
 
 ### interface
 
 "UDP socket (without libuv)."
 struct UDPSocket
   handle::Cint
-  retrydelay::Float64
 end
 
 """
@@ -26,7 +24,7 @@ end
 
 Open a UDP socket (without libuv).
 """
-UDPSocket(; retrydelay=RETRY_DELAY) = UDPSocket(ccall(:socket, Cint, (Cint, Cint, Cint), AF_INET, SOCK_DGRAM, 0), retrydelay)
+UDPSocket() = UDPSocket(ccall(:socket, Cint, (Cint, Cint, Cint), AF_INET, SOCK_DGRAM, 0))
 
 """
     close(socket::DirectSockets.UDPSocket)
@@ -73,17 +71,12 @@ Read a UDP packet from the specified socket, and return the bytes received. This
 """
 function Sockets.recv(sock::UDPSocket)
   data = zeros(UInt8, BUFSIZE)
-  while true
-    n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
-      sock.handle, data, length(data), WAITALL, Ptr{UInt8}(0), Ptr{UInt8}(0))
-    if n ≥ 0
-      resize!(data, n)
-      return data
-    end
-    err = Base.Libc.errno()
-    err != EAGAIN && throw(ErrorException("Socket unavailable: $err"))
-    sleep(RETRY_DELAY)
-  end
+  _poll(sock.handle)
+  n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
+    sock.handle, data, length(data), WAITALL, Ptr{UInt8}(0), Ptr{UInt8}(0))
+  n < 0 && throw(ErrorException("Socket unavailable: $(Base.Libc.errno())"))
+  resize!(data, n)
+  data
 end
 
 """
@@ -94,14 +87,11 @@ is too small for the data, the received data may be truncated. This call blocks.
 Returns the number of bytes read into the buffer, or a negative error code on error.
   """
 function recv!(sock::UDPSocket, data::Vector{UInt8})
-  while true
-    n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
-      sock.handle, data, length(data), WAITALL, Ptr{UInt8}(0), Ptr{UInt8}(0))
-    n ≥ 0 && return n
-    err = Base.Libc.errno()
-    err != EAGAIN && throw(ErrorException("Socket unavailable: $err"))
-    sleep(RETRY_DELAY)
-  end
+  _poll(sock.handle)
+  n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
+    sock.handle, data, length(data), WAITALL, Ptr{UInt8}(0), Ptr{UInt8}(0))
+  n < 0 && throw(ErrorException("Socket unavailable: $(Base.Libc.errno())"))
+  n
 end
 
 """
@@ -115,18 +105,13 @@ function Sockets.recvfrom(sock::UDPSocket)
   data = zeros(UInt8, BUFSIZE)
   sockaddr = zeros(UInt8, 16)
   sockaddr_len = Ref(UInt32(16))
-  while true
-    n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
-      sock.handle, data, length(data), WAITALL, sockaddr, sockaddr_len)
-    if n ≥ 0
-      resize!(data, n)
-      sockaddr_len[] ≥ 8 || throw(ErrorException("Socket address unavailable"))
-      return InetAddr(IPv4(sockaddr[5:8]...), sockaddr[3] * 256 + sockaddr[4]), data
-    end
-    err = Base.Libc.errno()
-    err != EAGAIN && throw(ErrorException("Socket unavailable: $err"))
-    sleep(RETRY_DELAY)
-  end
+  _poll(sock.handle)
+  n = ccall(:recvfrom, Cssize_t, (Cint, Ptr{Cvoid}, Csize_t, Cint, Ptr{Cvoid}, Ptr{UInt32}),
+    sock.handle, data, length(data), WAITALL, sockaddr, sockaddr_len)
+  n < 0 && throw(ErrorException("Socket unavailable: $(Base.Libc.errno())"))
+  resize!(data, n)
+  sockaddr_len[] ≥ 8 || throw(ErrorException("Socket address unavailable"))
+  InetAddr(IPv4(sockaddr[5:8]...), sockaddr[3] * 256 + sockaddr[4]), data
 end
 
 # TODO: support for ipv6
@@ -145,6 +130,17 @@ end
 function _sockaddr(host, port)
   sockaddr = sockaddr_in(AF_INET, hton(UInt16(port)), hton(UInt32(host)), 0)
   reinterpret(UInt8, [sockaddr])
+end
+
+struct pollfd
+  fd::Cint
+  events::Cint
+  revents::Cshort
+end
+
+function _poll(fd, timeout=-1)
+  pfd = pollfd(fd, POLLRDNORM, 0)
+  ccall(:poll, Cint, (Ptr{Cvoid}, Culong, Cint), reinterpret(UInt8, [pfd]), 1, timeout)
 end
 
 end # module
